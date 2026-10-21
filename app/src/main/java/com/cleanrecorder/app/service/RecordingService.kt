@@ -16,6 +16,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class RecordingService : Service() {
 
@@ -79,7 +82,10 @@ class RecordingService : Service() {
 
         val recordingsDir = File(getExternalFilesDir(null), "Recordings").apply { mkdirs() }
         val ext = if (format.equals("MP3", ignoreCase = true)) "mp3" else "m4a"
-        val fileName = "Lecture_${System.currentTimeMillis()}.$ext"
+
+        // DEFAULT FILENAME: Date and Time stamp (e.g. 2026-10-22 00-25-30.m4a)
+        val timeStamp = SimpleDateFormat("yyyy-MM-dd HH-mm-ss", Locale.getDefault()).format(Date())
+        val fileName = "$timeStamp.$ext"
         currentOutputFile = File(recordingsDir, fileName)
 
         val sampleRate = if (bitrateKbps <= 32) 16_000 else 44_100

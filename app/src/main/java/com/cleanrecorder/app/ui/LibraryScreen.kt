@@ -70,7 +70,6 @@ fun LibraryScreen(
     var renamingItem by remember { mutableStateOf<Recording?>(null) }
     var deletingItem by remember { mutableStateOf<Recording?>(null) }
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
-    var showDeleteAllDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -78,7 +77,7 @@ fun LibraryScreen(
             .statusBarsPadding()
             .padding(horizontal = AppSpacing.lg)
     ) {
-        // TOP HEADER: Title, Count, and Select / Batch Action Controls
+        // TOP HEADER: Title, Count, and Select / Done
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -103,40 +102,18 @@ fun LibraryScreen(
             if (recordings.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (isSelectMode) {
-                        // Select All / Deselect All
-                        TextButton(
-                            onClick = {
-                                if (selectedPaths.size == recordings.size) {
-                                    selectedPaths.clear()
-                                } else {
-                                    selectedPaths.clear()
-                                    selectedPaths.addAll(recordings.map { it.file.absolutePath })
-                                }
-                            },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = if (selectedPaths.size == recordings.size) "Deselect All" else "Select All",
-                                color = AppColors.Accent,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        // Done / Cancel
                         Button(
                             onClick = {
                                 isSelectMode = false
                                 selectedPaths.clear()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF151C33)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                             modifier = Modifier.height(34.dp)
                         ) {
-                            Text("Done", color = AppColors.Text, fontSize = 12.sp)
+                            Text("Done", color = AppColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     } else {
-                        // Enter Select Mode Button
                         Button(
                             onClick = { isSelectMode = true },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF151C33)),
@@ -152,7 +129,7 @@ fun LibraryScreen(
             }
         }
 
-        // BATCH ACTION BAR (when in Select Mode)
+        // BATCH ACTION BAR: Select All / Deselect All + Delete (X) [NO DELETE ALL BUTTON]
         AnimatedVisibility(visible = isSelectMode && recordings.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -165,12 +142,24 @@ fun LibraryScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Delete All Button
+                // Select All / Deselect All Toggle
                 TextButton(
-                    onClick = { showDeleteAllDialog = true },
+                    onClick = {
+                        if (selectedPaths.size == recordings.size) {
+                            selectedPaths.clear()
+                        } else {
+                            selectedPaths.clear()
+                            selectedPaths.addAll(recordings.map { it.file.absolutePath })
+                        }
+                    },
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
-                    Text("Delete All", color = AppColors.Danger, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (selectedPaths.size == recordings.size) "Deselect All" else "Select All",
+                        color = AppColors.Accent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 // Delete Selected Button
@@ -178,15 +167,20 @@ fun LibraryScreen(
                     onClick = { showBatchDeleteDialog = true },
                     enabled = selectedPaths.isNotEmpty(),
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Danger),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                     modifier = Modifier.height(32.dp)
                 ) {
-                    Text("Delete (${selectedPaths.size})", color = AppColors.Text, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Delete (${selectedPaths.size})",
+                        color = AppColors.Text,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
 
-        // RECORDINGS LIST (COMPACT CARDS TO FIT MORE ON SCREEN)
+        // RECORDINGS LIST (COMPACT CARDS)
         if (recordings.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -317,22 +311,6 @@ fun LibraryScreen(
             onDismiss = { showBatchDeleteDialog = false }
         )
     }
-
-    // Delete All Dialog
-    if (showDeleteAllDialog) {
-        DeleteConfirmDialog(
-            itemName = "ALL ${recordings.size} recordings",
-            onConfirm = {
-                playerManager.stop()
-                recordings.forEach { it.file.delete() }
-                selectedPaths.clear()
-                isSelectMode = false
-                showDeleteAllDialog = false
-                refreshList()
-            },
-            onDismiss = { showDeleteAllDialog = false }
-        )
-    }
 }
 
 @Composable
@@ -365,7 +343,6 @@ fun CompactRecordingCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Checkbox in Select Mode OR Compact Play Button
                 if (isSelectMode) {
                     Checkbox(
                         checked = isSelected,
@@ -392,7 +369,6 @@ fun CompactRecordingCard(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Title + Subtitle Column
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -430,7 +406,6 @@ fun CompactRecordingCard(
                     )
                 }
 
-                // Action Icons (Trim, Share, Delete) - Only when not in select mode
                 if (!isSelectMode) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onTrim, modifier = Modifier.size(30.dp)) {
@@ -449,7 +424,6 @@ fun CompactRecordingCard(
                 }
             }
 
-            // Inline Scrubber (only shown when actively playing this card)
             if (isPlaying) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
