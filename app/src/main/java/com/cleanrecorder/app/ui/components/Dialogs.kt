@@ -23,23 +23,26 @@ import com.cleanrecorder.app.theme.AppSpacing
 data class BitrateOption(
     val kbps: Int,
     val title: String,
-    val description: String,
-    val recommended: Boolean = false
+    val description: String
 )
 
 val BITRATE_OPTIONS = listOf(
-    BitrateOption(16, "16 kbps (Ultra Compact)", "~7 MB / hour · Optimal for speech & lectures", recommended = true),
-    BitrateOption(32, "32 kbps (Balanced Voice)", "~14 MB / hour · Clear voice with tiny footprint"),
-    BitrateOption(64, "64 kbps (High Clarity)", "~28 MB / hour · Excellent speech fidelity"),
+    BitrateOption(16, "16 kbps (Ultra Compact)", "~7 MB / hour · Ideal for voice & lectures"),
+    BitrateOption(32, "32 kbps (Balanced)", "~14 MB / hour · Clear voice with small footprint"),
+    BitrateOption(64, "64 kbps (High Clarity)", "~28 MB / hour · High speech fidelity"),
     BitrateOption(128, "128 kbps (Studio Quality)", "~57 MB / hour · Full spectrum audio")
 )
 
 @Composable
-fun BitrateSelectionDialog(
+fun SettingsDialog(
+    currentFormat: String,
     currentBitrateKbps: Int,
-    onSelect: (Int) -> Unit,
+    onSaveSettings: (format: String, bitrateKbps: Int) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var selectedFormat by remember { mutableStateOf(currentFormat) }
+    var selectedBitrate by remember { mutableIntStateOf(currentBitrateKbps) }
+
     Dialog(onDismissRequest = onDismiss) {
         Box(
             modifier = Modifier
@@ -51,61 +54,92 @@ fun BitrateSelectionDialog(
         ) {
             Column {
                 Text(
-                    text = "Recording Quality",
+                    text = "Recording Settings",
                     style = MaterialTheme.typography.titleLarge,
                     color = AppColors.Text
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Select bitrate for lecture capture (AAC audio container).",
+                    text = "Configure audio container and bitrate.",
                     fontSize = 13.sp,
                     color = AppColors.TextMuted
                 )
+
                 Spacer(modifier = Modifier.height(AppSpacing.lg))
 
-                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                // Format selector
+                Text(
+                    text = "CONTAINER FORMAT",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AppColors.TextFaint
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                ) {
+                    listOf("AAC", "MP3").forEach { fmt ->
+                        val isSelected = selectedFormat.equals(fmt, ignoreCase = true)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(AppRadius.md))
+                                .background(if (isSelected) AppColors.SurfaceRaised else AppColors.Surface)
+                                .border(1.dp, if (isSelected) AppColors.Accent else AppColors.Border, RoundedCornerShape(AppRadius.md))
+                                .clickable { selectedFormat = fmt }
+                                .padding(vertical = AppSpacing.md),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = fmt,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) AppColors.Accent else AppColors.TextMuted
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(AppSpacing.lg))
+
+                // Bitrate selector
+                Text(
+                    text = "BITRATE (COMPRESSION)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AppColors.TextFaint
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     BITRATE_OPTIONS.forEach { option ->
-                        val isSelected = option.kbps == currentBitrateKbps
+                        val isSelected = option.kbps == selectedBitrate
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(AppRadius.md))
                                 .background(if (isSelected) AppColors.SurfaceRaised else AppColors.Surface)
                                 .border(1.dp, if (isSelected) AppColors.Accent else AppColors.Border, RoundedCornerShape(AppRadius.md))
-                                .clickable { onSelect(option.kbps) }
-                                .padding(AppSpacing.md),
+                                .clickable { selectedBitrate = option.kbps }
+                                .padding(horizontal = AppSpacing.md, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = option.title,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 15.sp,
-                                        color = if (isSelected) AppColors.Accent else AppColors.Text
-                                    )
-                                    if (option.recommended) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(AppRadius.pill))
-                                                .background(AppColors.Accent)
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("BEST", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AppColors.Text)
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = option.title,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp,
+                                    color = if (isSelected) AppColors.Accent else AppColors.Text
+                                )
                                 Text(
                                     text = option.description,
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     color = AppColors.TextFaint
                                 )
                             }
                             if (isSelected) {
-                                Icon(Icons.Default.Check, contentDescription = "Selected", tint = AppColors.Accent)
+                                Icon(Icons.Default.Check, contentDescription = "Selected", tint = AppColors.Accent, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -114,7 +148,17 @@ fun BitrateSelectionDialog(
                 Spacer(modifier = Modifier.height(AppSpacing.lg))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) {
-                        Text("Done", color = AppColors.Accent)
+                        Text("Cancel", color = AppColors.TextMuted)
+                    }
+                    Spacer(modifier = Modifier.width(AppSpacing.sm))
+                    Button(
+                        onClick = {
+                            onSaveSettings(selectedFormat, selectedBitrate)
+                            onDismiss()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
+                    ) {
+                        Text("Save Settings", color = AppColors.Text)
                     }
                 }
             }
@@ -125,7 +169,7 @@ fun BitrateSelectionDialog(
 @Composable
 fun NameDialog(
     initialName: String,
-    title: String = "Rename Recording",
+    title: String = "Save Lecture Recording",
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
 ) {

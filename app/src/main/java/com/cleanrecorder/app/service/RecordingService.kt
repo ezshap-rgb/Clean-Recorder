@@ -25,6 +25,7 @@ class RecordingService : Service() {
         const val ACTION_PAUSE = "ACTION_PAUSE"
         const val ACTION_RESUME = "ACTION_RESUME"
         const val EXTRA_BITRATE_KBPS = "EXTRA_BITRATE_KBPS"
+        const val EXTRA_FORMAT = "EXTRA_FORMAT"
         const val NOTIFICATION_ID = 1001
 
         private val _isRecording = MutableStateFlow(false)
@@ -39,14 +40,12 @@ class RecordingService : Service() {
         private val _amplitude = MutableStateFlow(0f)
         val amplitude = _amplitude.asStateFlow()
 
-        private val _activeBitrateKbps = MutableStateFlow(16)
-        val activeBitrateKbps = _activeBitrateKbps.asStateFlow()
-
         private val _lastFinishedFile = MutableStateFlow<File?>(null)
         val lastFinishedFile = _lastFinishedFile.asStateFlow()
 
         fun clearLastFinishedFile() {
             _lastFinishedFile.value = null
+            _elapsedSeconds.value = 0L // Reset resting timer immediately to 0
         }
     }
 
@@ -62,7 +61,8 @@ class RecordingService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 val bitrate = intent.getIntExtra(EXTRA_BITRATE_KBPS, 16)
-                startRecording(bitrate)
+                val format = intent.getStringExtra(EXTRA_FORMAT) ?: "AAC"
+                startRecording(bitrate, format)
             }
             ACTION_STOP -> stopRecording()
             ACTION_PAUSE -> pauseRecording()
@@ -71,19 +71,17 @@ class RecordingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startRecording(bitrateKbps: Int) {
+    private fun startRecording(bitrateKbps: Int, format: String) {
         if (_isRecording.value) return
 
-        _activeBitrateKbps.value = bitrateKbps
         acquireWakeLock()
-        startForeground(NOTIFICATION_ID, buildNotification("Recording lecture ($bitrateKbps kbps)..."))
+        startForeground(NOTIFICATION_ID, buildNotification("Recording lecture ($bitrateKbps kbps $format)..."))
 
         val recordingsDir = File(getExternalFilesDir(null), "Recordings").apply { mkdirs() }
-        val fileName = "Lecture_${System.currentTimeMillis()}.m4a"
+        val ext = if (format.equals("MP3", ignoreCase = true)) "mp3" else "m4a"
+        val fileName = "Lecture_${System.currentTimeMillis()}.$ext"
         currentOutputFile = File(recordingsDir, fileName)
 
-        // For speech at 16 or 32 kbps, 16 kHz sample rate gives optimal voice clarity & tiny size.
-        // For higher bitrates (64/128 kbps), use 44.1 kHz.
         val sampleRate = if (bitrateKbps <= 32) 16_000 else 44_100
 
         try {
@@ -98,7 +96,7 @@ class RecordingService : Service() {
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 setAudioEncodingBitRate(bitrateKbps * 1000)
                 setAudioSamplingRate(sampleRate)
-                setAudioChannels(1) // Mono speech optimization
+                setAudioChannels(1)
                 setOutputFile(currentOutputFile?.absolutePath)
                 prepare()
                 start()
@@ -147,6 +145,7 @@ class RecordingService : Service() {
         _isRecording.value = false
         _isPaused.value = false
         _amplitude.value = 0f
+        _elapsedSeconds.value = 0L // Reset timer to 0 immediately upon stop
 
         currentOutputFile?.let {
             if (it.exists() && it.length() > 0) {

@@ -7,10 +7,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -48,13 +53,14 @@ fun TrimmerScreen(
 
     var inPointMs by remember { mutableLongStateOf(0L) }
     var outPointMs by remember { mutableLongStateOf(totalDurationMs) }
+    var isLooping by remember { mutableStateOf(true) }
     var canvasWidthPx by remember { mutableFloatStateOf(1f) }
     var isTrimming by remember { mutableStateOf(false) }
 
     val isPlaying by playerManager.isPlaying.collectAsState()
     val currentPositionMs by playerManager.currentPositionMs.collectAsState()
 
-    // 44 deterministic studio waveform envelope bars
+    // Deterministic waveform envelope bars matching original React Native design
     val waveformBars = remember(recording.name) {
         val count = 44
         val bars = mutableListOf<Float>()
@@ -73,16 +79,24 @@ fun TrimmerScreen(
 
     val formatTime: (Long) -> String = { ms ->
         val totalSecs = ms / 1000
-        val mins = totalSecs / 60
+        val hours = totalSecs / 3600
+        val mins = (totalSecs % 3600) / 60
         val secs = totalSecs % 60
-        String.format("%02d:%02d", mins, secs)
+        if (hours > 0) {
+            String.format("%d:%02d:%02d", hours, mins, secs)
+        } else {
+            String.format("%02d:%02d", mins, secs)
+        }
     }
 
-    // Auto-loop preview inside selection
-    LaunchedEffect(isPlaying, currentPositionMs, outPointMs) {
+    // Auto loop within region
+    LaunchedEffect(isPlaying, currentPositionMs, outPointMs, isLooping) {
         if (isPlaying && currentPositionMs >= outPointMs) {
-            playerManager.pause()
-            playerManager.seekTo(inPointMs.toInt())
+            if (isLooping) {
+                playerManager.seekTo(inPointMs.toInt())
+            } else {
+                playerManager.pause()
+            }
         }
     }
 
@@ -90,329 +104,521 @@ fun TrimmerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AppColors.Background)
-            // SAFE PADDING: statusBarsPadding & navigationBarsPadding keep everything away from notches & nav bars!
+            // EXTRA SAFE SPACE ON TOP: statusBarsPadding + 14dp extra breathing room!
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(top = 14.dp, start = AppSpacing.lg, end = AppSpacing.lg, bottom = AppSpacing.md)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top Action Bar
+        // TOP HEADER MATCHING IMAGE 2 EXACTLY
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = AppSpacing.xs),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = {
-                    playerManager.stop()
-                    onCancel()
-                },
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(AppColors.SurfaceRaised)
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = AppColors.Text)
-            }
-
-            Text(
-                text = "Audio Trimmer",
-                style = MaterialTheme.typography.titleLarge,
-                fontSize = 20.sp,
-                color = AppColors.Text
-            )
-
-            // Prominent Save Trim button
-            Button(
-                onClick = {
-                    if (isTrimming) return@Button
-                    isTrimming = true
-                    playerManager.stop()
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            val tempDest = File(recording.file.parentFile, "trim_${System.currentTimeMillis()}.${recording.file.extension}")
-                            try {
-                                AudioTrimmer.trimLossless(
-                                    sourceFile = recording.file,
-                                    destinationFile = tempDest,
-                                    inPointMs = inPointMs,
-                                    outPointMs = outPointMs
-                                )
-                                recording.file.delete()
-                                tempDest.renameTo(recording.file)
-                            } catch (_: Exception) {}
-                        }
-                        isTrimming = false
-                        onFinished()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent),
-                contentPadding = PaddingValues(horizontal = AppSpacing.md, vertical = AppSpacing.xs)
-            ) {
-                if (isTrimming) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AppColors.Text, strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(AppSpacing.xs))
-                    Text("Save Trim", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        // Region Duration Info Card
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(AppRadius.card))
-                .background(AppColors.Surface)
-                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
-                .padding(vertical = AppSpacing.md, horizontal = AppSpacing.lg)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("IN POINT", color = AppColors.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(formatTime(inPointMs), color = AppColors.Accent, fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("CLIP LENGTH", color = AppColors.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(formatTime(outPointMs - inPointMs), color = AppColors.Warning, fontSize = 20.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("OUT POINT", color = AppColors.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(formatTime(outPointMs), color = AppColors.Warning, fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        // Waveform Container with Interactive In/Out Dragging & Tap-to-Seek
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(170.dp)
-                .clip(RoundedCornerShape(AppRadius.card))
-                .background(AppColors.Surface)
-                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
-                .onSizeChanged { canvasWidthPx = it.width.toFloat().coerceAtLeast(1f) }
-                .pointerInput(totalDurationMs) {
-                    detectTapGestures { offset ->
-                        val touchX = offset.x.coerceIn(0f, canvasWidthPx)
-                        val touchMs = ((touchX / canvasWidthPx) * totalDurationMs).toLong()
-                        playerManager.seekTo(touchMs.toInt())
-                    }
-                }
-                .pointerInput(totalDurationMs) {
-                    detectDragGestures { change, _ ->
-                        change.consume()
-                        val touchX = change.position.x.coerceIn(0f, canvasWidthPx)
-                        val touchMs = ((touchX / canvasWidthPx) * totalDurationMs).toLong()
-
-                        val distToIn = Math.abs(touchMs - inPointMs)
-                        val distToOut = Math.abs(touchMs - outPointMs)
-
-                        if (distToIn < distToOut) {
-                            inPointMs = touchMs.coerceIn(0L, (outPointMs - 1000L).coerceAtLeast(0L))
-                        } else {
-                            outPointMs = touchMs.coerceIn((inPointMs + 1000L).coerceAtMost(totalDurationMs), totalDurationMs)
-                        }
-                    }
-                }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 14.dp)) {
-                val w = size.width
-                val h = size.height
-
-                val inX = (inPointMs.toFloat() / totalDurationMs) * w
-                val outX = (outPointMs.toFloat() / totalDurationMs) * w
-                val playheadX = (currentPositionMs.toFloat() / totalDurationMs) * w
-
-                // Dimmed trimmed-away outer regions
-                drawRect(color = Color(0xB3000000), topLeft = Offset(0f, 0f), size = Size(inX, h))
-                drawRect(color = Color(0xB3000000), topLeft = Offset(outX, 0f), size = Size(w - outX, h))
-
-                // Active glowing region
-                drawRect(color = Color(0x225C4FEE), topLeft = Offset(inX, 0f), size = Size(outX - inX, h))
-
-                // Waveform bars
-                val barWidth = w / waveformBars.size
-                waveformBars.forEachIndexed { idx, barAmp ->
-                    val barX = idx * barWidth + barWidth / 2f
-                    val barH = h * barAmp * 0.78f
-                    val barColor = if (barX in inX..outX) AppColors.Text else AppColors.TextFaint
-
-                    drawLine(
-                        color = barColor,
-                        start = Offset(barX, (h - barH) / 2f),
-                        end = Offset(barX, (h + barH) / 2f),
-                        strokeWidth = barWidth * 0.6f
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Audio Trimmer",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppColors.Text
                     )
-                }
-
-                // IN Handle (Electric Violet)
-                drawLine(
-                    color = AppColors.Accent,
-                    start = Offset(inX, 0f),
-                    end = Offset(inX, h),
-                    strokeWidth = 4.dp.toPx()
-                )
-                drawCircle(color = AppColors.Accent, radius = 9.dp.toPx(), center = Offset(inX, 16.dp.toPx()))
-
-                // OUT Handle (Vibrant Magenta)
-                drawLine(
-                    color = AppColors.Warning,
-                    start = Offset(outX, 0f),
-                    end = Offset(outX, h),
-                    strokeWidth = 4.dp.toPx()
-                )
-                drawCircle(color = AppColors.Warning, radius = 9.dp.toPx(), center = Offset(outX, h - 16.dp.toPx()))
-
-                // Playhead Needle
-                drawLine(
-                    color = Color.White,
-                    start = Offset(playheadX, 0f),
-                    end = Offset(playheadX, h),
-                    strokeWidth = 2.5.dp.toPx()
-                )
-                drawCircle(color = Color.White, radius = 6.dp.toPx(), center = Offset(playheadX, h / 2f))
-            }
-        }
-
-        // Dedicated Manual Playhead Scrubber Slider
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(AppRadius.md))
-                .background(AppColors.Surface)
-                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.md))
-                .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("PLAYHEAD SCRUBBER", color = AppColors.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    text = "${formatTime(currentPositionMs.toLong())} / ${formatTime(totalDurationMs)}",
-                    color = AppColors.Text,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Slider(
-                value = currentPositionMs.toFloat(),
-                onValueChange = { targetMs ->
-                    playerManager.seekTo(targetMs.toInt())
-                },
-                valueRange = 0f..totalDurationMs.toFloat(),
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = AppColors.Accent,
-                    inactiveTrackColor = AppColors.Border
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        // Quick Seek and In/Out Snapping Buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            OutlinedButton(
-                onClick = {
-                    inPointMs = currentPositionMs.toLong().coerceIn(0L, (outPointMs - 1000L).coerceAtLeast(0L))
-                },
-                border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Accent),
-                shape = RoundedCornerShape(AppRadius.md)
-            ) {
-                Text("Set IN to Current", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-
-            OutlinedButton(
-                onClick = {
-                    outPointMs = currentPositionMs.toLong().coerceIn((inPointMs + 1000L).coerceAtMost(totalDurationMs), totalDurationMs)
-                },
-                border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Warning),
-                shape = RoundedCornerShape(AppRadius.md)
-            ) {
-                Text("Set OUT to Current", color = AppColors.Warning, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        // Playback Control Cluster: -5s, Play/Pause Toggle, +5s
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = AppSpacing.sm),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Jump back 5 sec
-            IconButton(
-                onClick = {
-                    val prev = (currentPositionMs - 5000).coerceAtLeast(inPointMs.toInt())
-                    playerManager.seekTo(prev)
-                },
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(AppColors.SurfaceRaised)
-            ) {
-                Icon(Icons.Default.Replay5, contentDescription = "-5s", tint = AppColors.Text)
-            }
-
-            Spacer(modifier = Modifier.width(AppSpacing.xl))
-
-            // Primary Play / Pause Toggle Button
-            IconButton(
-                onClick = {
-                    if (isPlaying) {
-                        playerManager.pause()
-                    } else {
-                        // Start playing from current position or from inPoint if outside
-                        val startPos = if (currentPositionMs in inPointMs..outPointMs) currentPositionMs else inPointMs.toInt()
-                        playerManager.play(
-                            file = recording.file,
-                            startFromMs = startPos,
-                            loopToMs = outPointMs.toInt()
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(AppRadius.pill))
+                            .background(Color(0xFF1B163B))
+                            .border(1.dp, AppColors.Accent.copy(alpha = 0.6f), RoundedCornerShape(AppRadius.pill))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "STUDIO",
+                            color = AppColors.Accent,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                },
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(if (isPlaying) AppColors.Warning else AppColors.Accent)
-            ) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
-                    tint = AppColors.Text,
-                    modifier = Modifier.size(34.dp)
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "${recording.name}.${recording.format.lowercase()} · ${recording.formattedSize}",
+                    color = AppColors.TextMuted,
+                    fontSize = 13.sp
                 )
             }
 
-            Spacer(modifier = Modifier.width(AppSpacing.xl))
-
-            // Jump forward 5 sec
-            IconButton(
-                onClick = {
-                    val next = (currentPositionMs + 5000).coerceAtMost(outPointMs.toInt())
-                    playerManager.seekTo(next)
-                },
+            // Close Button
+            Row(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
+                    .clip(RoundedCornerShape(AppRadius.pill))
                     .background(AppColors.SurfaceRaised)
+                    .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.pill))
+                    .clickable {
+                        playerManager.stop()
+                        onCancel()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Forward5, contentDescription = "+5s", tint = AppColors.Text)
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = AppColors.Text, modifier = Modifier.size(15.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Close", color = AppColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        // CARD 1: PLAYBACK CONTROLS MATCHING IMAGE 2 EXACTLY
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AppRadius.card))
+                .background(AppColors.Surface)
+                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
+                .padding(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Top Row: [ ▶ PLAY ] and [ ● Playhead: 00:00 ]
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Big Magenta Play Button
+                    Button(
+                        onClick = {
+                            if (isPlaying) {
+                                playerManager.pause()
+                            } else {
+                                val startPos = if (currentPositionMs in inPointMs..outPointMs) currentPositionMs else inPointMs.toInt()
+                                playerManager.play(
+                                    file = recording.file,
+                                    startFromMs = startPos,
+                                    loopToMs = outPointMs.toInt()
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF50ACE)),
+                        shape = RoundedCornerShape(AppRadius.pill),
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .height(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            tint = Color.Black,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isPlaying) "PAUSE" else "PLAY",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    // Amber Playhead Controller Button
+                    Row(
+                        modifier = Modifier
+                            .weight(0.58f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(AppRadius.pill))
+                            .background(Color(0xFF151C33))
+                            // BORDER IS AMBER (#F59E0B) MATCHING THEME
+                            .border(1.5.dp, AppColors.DotGold, RoundedCornerShape(AppRadius.pill))
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFF50ACE))
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Playhead: ", color = AppColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            text = formatTime(currentPositionMs.toLong()),
+                            color = Color(0xFFF50ACE),
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+
+                // Bottom Row: [ Jump to IN ] [ Jump to OUT ] [ ↺ Loop Selection ]
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(AppRadius.md))
+                            .background(Color(0xFF151C33))
+                            .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.md))
+                            .clickable {
+                                playerManager.seekTo(inPointMs.toInt())
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Jump to IN", color = AppColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(AppRadius.md))
+                            .background(Color(0xFF151C33))
+                            .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.md))
+                            .clickable {
+                                playerManager.seekTo(outPointMs.toInt())
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Jump to OUT", color = AppColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1.1f)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(AppRadius.md))
+                            .background(if (isLooping) Color(0xFF1E2142) else Color(0xFF151C33))
+                            .border(1.dp, if (isLooping) AppColors.Accent else AppColors.Border, RoundedCornerShape(AppRadius.md))
+                            .clickable { isLooping = !isLooping },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Repeat, contentDescription = null, tint = if (isLooping) AppColors.Accent else AppColors.TextMuted, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Loop Selection",
+                                color = if (isLooping) AppColors.Accent else AppColors.Text,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // CARD 2: WAVEFORM DISPLAY & INTERACTIVE TRIMMING MATCHING IMAGE 2
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AppRadius.card))
+                .background(AppColors.Surface)
+                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
+                .padding(14.dp)
+        ) {
+            Column {
+                // Top timestamps and tick line
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("00:00", color = AppColors.TextFaint, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text("|   ·   |   ·   |", color = Color(0xFF263252), fontSize = 10.sp)
+                    Text(formatTime(totalDurationMs), color = AppColors.TextFaint, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Waveform Canvas with AMBER Playhead Needle
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .onSizeChanged { canvasWidthPx = it.width.toFloat().coerceAtLeast(1f) }
+                        .pointerInput(totalDurationMs) {
+                            detectTapGestures { offset ->
+                                val touchX = offset.x.coerceIn(0f, canvasWidthPx)
+                                val touchMs = ((touchX / canvasWidthPx) * totalDurationMs).toLong()
+                                playerManager.seekTo(touchMs.toInt())
+                            }
+                        }
+                        .pointerInput(totalDurationMs) {
+                            detectDragGestures { change, _ ->
+                                change.consume()
+                                val touchX = change.position.x.coerceIn(0f, canvasWidthPx)
+                                val touchMs = ((touchX / canvasWidthPx) * totalDurationMs).toLong()
+
+                                val distToIn = Math.abs(touchMs - inPointMs)
+                                val distToOut = Math.abs(touchMs - outPointMs)
+
+                                if (distToIn < distToOut) {
+                                    inPointMs = touchMs.coerceIn(0L, (outPointMs - 1000L).coerceAtLeast(0L))
+                                } else {
+                                    outPointMs = touchMs.coerceIn((inPointMs + 1000L).coerceAtMost(totalDurationMs), totalDurationMs)
+                                }
+                            }
+                        }
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val w = size.width
+                        val h = size.height
+
+                        val inX = (inPointMs.toFloat() / totalDurationMs) * w
+                        val outX = (outPointMs.toFloat() / totalDurationMs) * w
+                        val playheadX = (currentPositionMs.toFloat() / totalDurationMs) * w
+
+                        // Dimmed outer regions
+                        drawRect(color = Color(0xCC070913), topLeft = Offset(0f, 0f), size = Size(inX, h))
+                        drawRect(color = Color(0xCC070913), topLeft = Offset(outX, 0f), size = Size(w - outX, h))
+
+                        // Waveform bars
+                        val barWidth = w / waveformBars.size
+                        waveformBars.forEachIndexed { idx, barAmp ->
+                            val barX = idx * barWidth + barWidth / 2f
+                            val barH = h * barAmp * 0.82f
+                            val barColor = if (barX in inX..outX) Color(0xFF6366F1) else Color(0xFF2A3454)
+
+                            drawLine(
+                                color = barColor,
+                                start = Offset(barX, (h - barH) / 2f),
+                                end = Offset(barX, (h + barH) / 2f),
+                                strokeWidth = barWidth * 0.65f
+                            )
+                        }
+
+                        // Left IN Handle Bracket (Pink/Magenta rounded bar matching image 2)
+                        drawRoundRect(
+                            color = Color(0xFFF50ACE),
+                            topLeft = Offset(inX - 4.dp.toPx(), 0f),
+                            size = Size(6.dp.toPx(), h),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
+                        )
+
+                        // Right OUT Handle Bracket (Rose/Red rounded bar matching image 2)
+                        drawRoundRect(
+                            color = Color(0xFFF43F5E),
+                            topLeft = Offset(outX - 2.dp.toPx(), 0f),
+                            size = Size(6.dp.toPx(), h),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
+                        )
+
+                        // AMBER PLAYHEAD NEEDLE (#F59E0B)
+                        drawLine(
+                            color = AppColors.DotGold,
+                            start = Offset(playheadX, 0f),
+                            end = Offset(playheadX, h),
+                            strokeWidth = 2.5.dp.toPx()
+                        )
+                        drawCircle(color = AppColors.DotGold, radius = 5.dp.toPx(), center = Offset(playheadX, h / 2f))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Playhead Scrubber slider with AMBER THUMB
+                Slider(
+                    value = currentPositionMs.toFloat(),
+                    onValueChange = { targetMs -> playerManager.seekTo(targetMs.toInt()) },
+                    valueRange = 0f..totalDurationMs.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = AppColors.DotGold,
+                        activeTrackColor = AppColors.DotGold,
+                        inactiveTrackColor = Color(0xFF1E2746)
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(24.dp)
+                )
+            }
+        }
+
+        // CARD 3: REGION TIME CONTROLS MATCHING IMAGE 2 EXACTLY
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AppRadius.card))
+                .background(AppColors.Surface)
+                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
+                .padding(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // START ROW
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Start pill
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(AppRadius.md))
+                            .background(Color(0xFF0D1E24))
+                            .border(1.dp, Color(0xFF0E4A40), RoundedCornerShape(AppRadius.md))
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF10B981)))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("START", color = Color(0xFF10B981), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text(formatTime(inPointMs), color = AppColors.Text, fontSize = 15.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Set to Playhead (Start)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(AppRadius.md))
+                            .background(Color(0xFF0D1E24))
+                            .border(1.dp, Color(0xFF0E4A40), RoundedCornerShape(AppRadius.md))
+                            .clickable {
+                                inPointMs = currentPositionMs.toLong().coerceIn(0L, (outPointMs - 1000L).coerceAtLeast(0L))
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text("|‹ Set to Playhead", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // END ROW
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // End pill
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(AppRadius.md))
+                            .background(Color(0xFF24101A))
+                            .border(1.dp, Color(0xFF5C142A), RoundedCornerShape(AppRadius.md))
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFF43F5E)))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("END", color = Color(0xFFF43F5E), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text(formatTime(outPointMs), color = AppColors.Text, fontSize = 15.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Set to Playhead (End)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(AppRadius.md))
+                            .background(Color(0xFF24101A))
+                            .border(1.dp, Color(0xFF5C142A), RoundedCornerShape(AppRadius.md))
+                            .clickable {
+                                outPointMs = currentPositionMs.toLong().coerceIn((inPointMs + 1000L).coerceAtMost(totalDurationMs), totalDurationMs)
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text("›| Set to Playhead", color = Color(0xFFF43F5E), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Selection Duration subtitle
+                val diffMs = outPointMs - inPointMs
+                val diffSecs = diffMs / 1000f
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "Selection Duration: ${formatTime(diffMs)}  (${String.format("%.1fs", diffSecs)})",
+                        color = Color(0xFFA8B4D8),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        // CARD 4: ACTION / CONFIRMATION MATCHING IMAGE 2 EXACTLY
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AppRadius.card))
+                .background(AppColors.Surface)
+                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
+                .padding(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Trim replaces the original file permanently with your In → Out selection.",
+                    color = AppColors.TextMuted,
+                    fontSize = 12.sp
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Cancel
+                    Button(
+                        onClick = {
+                            playerManager.stop()
+                            onCancel()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF151C33)),
+                        shape = RoundedCornerShape(AppRadius.md),
+                        modifier = Modifier
+                            .weight(0.38f)
+                            .height(46.dp)
+                            .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.md))
+                    ) {
+                        Text("Cancel", color = AppColors.Text, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    // Save Trimmed Audio
+                    Button(
+                        onClick = {
+                            if (isTrimming) return@Button
+                            isTrimming = true
+                            playerManager.stop()
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    val tempDest = File(recording.file.parentFile, "trim_${System.currentTimeMillis()}.${recording.file.extension}")
+                                    try {
+                                        AudioTrimmer.trimLossless(
+                                            sourceFile = recording.file,
+                                            destinationFile = tempDest,
+                                            inPointMs = inPointMs,
+                                            outPointMs = outPointMs
+                                        )
+                                        recording.file.delete()
+                                        tempDest.renameTo(recording.file)
+                                    } catch (_: Exception) {}
+                                }
+                                isTrimming = false
+                                onFinished()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent),
+                        shape = RoundedCornerShape(AppRadius.md),
+                        modifier = Modifier
+                            .weight(0.62f)
+                            .height(46.dp)
+                    ) {
+                        if (isTrimming) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AppColors.Text, strokeWidth = 2.dp)
+                        } else {
+                            Text("↓ Save Trimmed Audio", color = AppColors.Text, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
     }
