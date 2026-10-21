@@ -2,9 +2,9 @@ package com.cleanrecorder.app.ui
 
 import android.content.Context
 import android.content.Intent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +28,7 @@ import com.cleanrecorder.app.service.RecordingService
 import com.cleanrecorder.app.theme.AppColors
 import com.cleanrecorder.app.theme.AppRadius
 import com.cleanrecorder.app.theme.AppSpacing
+import com.cleanrecorder.app.ui.components.BitrateSelectionDialog
 import com.cleanrecorder.app.ui.components.LevelMeter
 import com.cleanrecorder.app.ui.components.NameDialog
 
@@ -35,6 +37,11 @@ fun RecordScreen(
     onRecordingSaved: () -> Unit
 ) {
     val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("clean_recorder_prefs", Context.MODE_PRIVATE) }
+
+    var selectedBitrate by remember {
+        mutableIntStateOf(prefs.getInt("bitrate_kbps", 16))
+    }
 
     val isRecording by RecordingService.isRecording.collectAsState()
     val isPaused by RecordingService.isPaused.collectAsState()
@@ -43,6 +50,7 @@ fun RecordScreen(
     val lastFinishedFile by RecordingService.lastFinishedFile.collectAsState()
 
     var showSaveDialog by remember { mutableStateOf(false) }
+    var showBitrateDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(lastFinishedFile) {
         if (lastFinishedFile != null) {
@@ -65,15 +73,16 @@ fun RecordScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(AppSpacing.xl),
+            .statusBarsPadding()
+            .padding(horizontal = AppSpacing.xl, vertical = AppSpacing.md),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Header
+        // Top Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = AppSpacing.lg),
+                .padding(top = AppSpacing.sm),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -82,23 +91,36 @@ fun RecordScreen(
                 style = MaterialTheme.typography.titleLarge,
                 color = AppColors.Text
             )
-            Box(
+
+            // Clickable Quality badge to change bitrate
+            Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(AppRadius.pill))
                     .background(AppColors.SurfaceRaised)
-                    .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.pill))
-                    .padding(horizontal = AppSpacing.md, vertical = AppSpacing.xs)
+                    .border(1.dp, AppColors.Accent, RoundedCornerShape(AppRadius.pill))
+                    .clickable(enabled = !isRecording) { showBitrateDialog = true }
+                    .padding(horizontal = AppSpacing.md, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "AAC 128 kbps",
+                    text = "AAC $selectedBitrate kbps",
                     color = AppColors.Accent,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.Bold
                 )
+                if (!isRecording) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "Change Bitrate",
+                        tint = AppColors.Accent,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
 
-        // Timer & Level Meter Card
+        // Timer & Animated Level Meter Card
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -119,9 +141,9 @@ fun RecordScreen(
                 Spacer(modifier = Modifier.height(AppSpacing.sm))
                 Text(
                     text = when {
-                        !isRecording -> "Tap record to begin"
+                        !isRecording -> "Ready to record ($selectedBitrate kbps)"
                         isPaused -> "Paused"
-                        else -> "Recording live"
+                        else -> "Recording live ($selectedBitrate kbps)"
                     },
                     color = when {
                         !isRecording -> AppColors.TextFaint
@@ -133,7 +155,7 @@ fun RecordScreen(
 
                 Spacer(modifier = Modifier.height(AppSpacing.xl))
 
-                // Real-time animated level meter
+                // Real-time Level Meter
                 LevelMeter(
                     amplitude = amplitude,
                     isRecording = isRecording && !isPaused
@@ -141,16 +163,16 @@ fun RecordScreen(
             }
         }
 
-        // Control buttons
+        // Recording Controls
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = AppSpacing.xxl),
+                .padding(bottom = AppSpacing.xl),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isRecording) {
-                // Pause / Resume Button
+                // Pause / Resume
                 IconButton(
                     onClick = {
                         val action = if (isPaused) RecordingService.ACTION_RESUME else RecordingService.ACTION_PAUSE
@@ -158,7 +180,7 @@ fun RecordScreen(
                         context.startService(intent)
                     },
                     modifier = Modifier
-                        .size(56.dp)
+                        .size(58.dp)
                         .clip(CircleShape)
                         .background(AppColors.SurfaceRaised)
                         .border(1.dp, AppColors.Border, CircleShape)
@@ -166,7 +188,8 @@ fun RecordScreen(
                     Icon(
                         imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                         contentDescription = "Pause",
-                        tint = AppColors.Text
+                        tint = AppColors.Text,
+                        modifier = Modifier.size(28.dp)
                     )
                 }
 
@@ -191,11 +214,12 @@ fun RecordScreen(
                     )
                 }
             } else {
-                // Record Button
+                // Big Record Button
                 IconButton(
                     onClick = {
                         val intent = Intent(context, RecordingService::class.java).apply {
                             action = RecordingService.ACTION_START
+                            putExtra(RecordingService.EXTRA_BITRATE_KBPS, selectedBitrate)
                         }
                         context.startForegroundService(intent)
                     },
@@ -215,7 +239,20 @@ fun RecordScreen(
         }
     }
 
-    // Name dialog after recording finishes
+    // Bitrate selection dialog
+    if (showBitrateDialog) {
+        BitrateSelectionDialog(
+            currentBitrateKbps = selectedBitrate,
+            onSelect = { newBitrate ->
+                selectedBitrate = newBitrate
+                prefs.edit().putInt("bitrate_kbps", newBitrate).apply()
+                showBitrateDialog = false
+            },
+            onDismiss = { showBitrateDialog = false }
+        )
+    }
+
+    // Save Name Dialog
     if (showSaveDialog && lastFinishedFile != null) {
         val file = lastFinishedFile!!
         NameDialog(

@@ -24,6 +24,7 @@ class RecordingService : Service() {
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_PAUSE = "ACTION_PAUSE"
         const val ACTION_RESUME = "ACTION_RESUME"
+        const val EXTRA_BITRATE_KBPS = "EXTRA_BITRATE_KBPS"
         const val NOTIFICATION_ID = 1001
 
         private val _isRecording = MutableStateFlow(false)
@@ -37,6 +38,9 @@ class RecordingService : Service() {
 
         private val _amplitude = MutableStateFlow(0f)
         val amplitude = _amplitude.asStateFlow()
+
+        private val _activeBitrateKbps = MutableStateFlow(16)
+        val activeBitrateKbps = _activeBitrateKbps.asStateFlow()
 
         private val _lastFinishedFile = MutableStateFlow<File?>(null)
         val lastFinishedFile = _lastFinishedFile.asStateFlow()
@@ -56,7 +60,10 @@ class RecordingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startRecording()
+            ACTION_START -> {
+                val bitrate = intent.getIntExtra(EXTRA_BITRATE_KBPS, 16)
+                startRecording(bitrate)
+            }
             ACTION_STOP -> stopRecording()
             ACTION_PAUSE -> pauseRecording()
             ACTION_RESUME -> resumeRecording()
@@ -64,15 +71,20 @@ class RecordingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startRecording() {
+    private fun startRecording(bitrateKbps: Int) {
         if (_isRecording.value) return
 
+        _activeBitrateKbps.value = bitrateKbps
         acquireWakeLock()
-        startForeground(NOTIFICATION_ID, buildNotification("Recording lecture..."))
+        startForeground(NOTIFICATION_ID, buildNotification("Recording lecture ($bitrateKbps kbps)..."))
 
         val recordingsDir = File(getExternalFilesDir(null), "Recordings").apply { mkdirs() }
         val fileName = "Lecture_${System.currentTimeMillis()}.m4a"
         currentOutputFile = File(recordingsDir, fileName)
+
+        // For speech at 16 or 32 kbps, 16 kHz sample rate gives optimal voice clarity & tiny size.
+        // For higher bitrates (64/128 kbps), use 44.1 kHz.
+        val sampleRate = if (bitrateKbps <= 32) 16_000 else 44_100
 
         try {
             recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -84,9 +96,9 @@ class RecordingService : Service() {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioEncodingBitRate(128_000)
-                setAudioSamplingRate(44_100)
-                setAudioChannels(1)
+                setAudioEncodingBitRate(bitrateKbps * 1000)
+                setAudioSamplingRate(sampleRate)
+                setAudioChannels(1) // Mono speech optimization
                 setOutputFile(currentOutputFile?.absolutePath)
                 prepare()
                 start()
@@ -153,9 +165,8 @@ class RecordingService : Service() {
             while (isActive && _isRecording.value) {
                 delay(100)
                 if (!_isPaused.value) {
-                    _elapsedSeconds.value += 1L // in 100ms units or count seconds
+                    _elapsedSeconds.value += 1L
                     val amp = recorder?.maxAmplitude ?: 0
-                    // Normalize amplitude 0..32767 to 0..1 with subtle log scale
                     val normalized = (amp / 32767f).coerceIn(0f, 1f)
                     _amplitude.value = normalized
                 } else {

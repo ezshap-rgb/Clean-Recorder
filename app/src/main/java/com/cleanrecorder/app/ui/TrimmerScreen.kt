@@ -3,15 +3,14 @@ package com.cleanrecorder.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -55,9 +54,9 @@ fun TrimmerScreen(
     val isPlaying by playerManager.isPlaying.collectAsState()
     val currentPositionMs by playerManager.currentPositionMs.collectAsState()
 
-    // Deterministic waveform envelope bars matching original React Native algorithm
+    // 44 deterministic studio waveform envelope bars
     val waveformBars = remember(recording.name) {
-        val count = 48
+        val count = 44
         val bars = mutableListOf<Float>()
         var hash = 0
         for (ch in recording.name) {
@@ -79,30 +78,53 @@ fun TrimmerScreen(
         String.format("%02d:%02d", mins, secs)
     }
 
+    // Auto-loop preview inside selection
+    LaunchedEffect(isPlaying, currentPositionMs, outPointMs) {
+        if (isPlaying && currentPositionMs >= outPointMs) {
+            playerManager.pause()
+            playerManager.seekTo(inPointMs.toInt())
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(AppColors.Background)
-            .padding(AppSpacing.lg),
+            // SAFE PADDING: statusBarsPadding & navigationBarsPadding keep everything away from notches & nav bars!
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Top Bar
+        // Top Action Bar
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = AppSpacing.xs),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = {
-                playerManager.stop()
-                onCancel()
-            }) {
+            IconButton(
+                onClick = {
+                    playerManager.stop()
+                    onCancel()
+                },
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(AppColors.SurfaceRaised)
+            ) {
                 Icon(Icons.Default.Close, contentDescription = "Cancel", tint = AppColors.Text)
             }
+
             Text(
                 text = "Audio Trimmer",
                 style = MaterialTheme.typography.titleLarge,
+                fontSize = 20.sp,
                 color = AppColors.Text
             )
+
+            // Prominent Save Trim button
             Button(
                 onClick = {
                     if (isTrimming) return@Button
@@ -126,57 +148,66 @@ fun TrimmerScreen(
                         onFinished()
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
+                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent),
+                contentPadding = PaddingValues(horizontal = AppSpacing.md, vertical = AppSpacing.xs)
             ) {
                 if (isTrimming) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AppColors.Text)
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AppColors.Text, strokeWidth = 2.dp)
                 } else {
                     Icon(Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(AppSpacing.xs))
-                    Text("Save Trim")
+                    Text("Save Trim", fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // Clip Info Card
+        // Region Duration Info Card
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(AppRadius.card))
                 .background(AppColors.Surface)
                 .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
-                .padding(AppSpacing.lg)
+                .padding(vertical = AppSpacing.md, horizontal = AppSpacing.lg)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("IN POINT", color = AppColors.TextFaint, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(formatTime(inPointMs), color = AppColors.Text, fontSize = 20.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    Text("IN POINT", color = AppColors.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(formatTime(inPointMs), color = AppColors.Accent, fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("CLIP DURATION", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("CLIP LENGTH", color = AppColors.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Text(formatTime(outPointMs - inPointMs), color = AppColors.Warning, fontSize = 20.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("OUT POINT", color = AppColors.TextFaint, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(formatTime(outPointMs), color = AppColors.Text, fontSize = 20.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    Text("OUT POINT", color = AppColors.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(formatTime(outPointMs), color = AppColors.Warning, fontSize = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // Waveform & Draggable Handles Container
+        // Waveform Container with Interactive In/Out Dragging & Tap-to-Seek
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp)
+                .height(170.dp)
                 .clip(RoundedCornerShape(AppRadius.card))
                 .background(AppColors.Surface)
                 .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
                 .onSizeChanged { canvasWidthPx = it.width.toFloat().coerceAtLeast(1f) }
-                .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
+                .pointerInput(totalDurationMs) {
+                    detectTapGestures { offset ->
+                        val touchX = offset.x.coerceIn(0f, canvasWidthPx)
+                        val touchMs = ((touchX / canvasWidthPx) * totalDurationMs).toLong()
+                        playerManager.seekTo(touchMs.toInt())
+                    }
+                }
+                .pointerInput(totalDurationMs) {
+                    detectDragGestures { change, _ ->
                         change.consume()
                         val touchX = change.position.x.coerceIn(0f, canvasWidthPx)
                         val touchMs = ((touchX / canvasWidthPx) * totalDurationMs).toLong()
@@ -192,7 +223,7 @@ fun TrimmerScreen(
                     }
                 }
         ) {
-            Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 16.dp)) {
+            Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 14.dp)) {
                 val w = size.width
                 val h = size.height
 
@@ -200,18 +231,18 @@ fun TrimmerScreen(
                 val outX = (outPointMs.toFloat() / totalDurationMs) * w
                 val playheadX = (currentPositionMs.toFloat() / totalDurationMs) * w
 
-                // Draw dimmed outer regions
-                drawRect(color = Color(0x99000000), topLeft = Offset(0f, 0f), size = Size(inX, h))
-                drawRect(color = Color(0x99000000), topLeft = Offset(outX, 0f), size = Size(w - outX, h))
+                // Dimmed trimmed-away outer regions
+                drawRect(color = Color(0xB3000000), topLeft = Offset(0f, 0f), size = Size(inX, h))
+                drawRect(color = Color(0xB3000000), topLeft = Offset(outX, 0f), size = Size(w - outX, h))
 
-                // Draw active highlighted region
+                // Active glowing region
                 drawRect(color = Color(0x225C4FEE), topLeft = Offset(inX, 0f), size = Size(outX - inX, h))
 
-                // Draw waveform bars
+                // Waveform bars
                 val barWidth = w / waveformBars.size
                 waveformBars.forEachIndexed { idx, barAmp ->
                     val barX = idx * barWidth + barWidth / 2f
-                    val barH = h * barAmp * 0.8f
+                    val barH = h * barAmp * 0.78f
                     val barColor = if (barX in inX..outX) AppColors.Text else AppColors.TextFaint
 
                     drawLine(
@@ -222,87 +253,166 @@ fun TrimmerScreen(
                     )
                 }
 
-                // In handle (Electric Violet)
+                // IN Handle (Electric Violet)
                 drawLine(
                     color = AppColors.Accent,
                     start = Offset(inX, 0f),
                     end = Offset(inX, h),
                     strokeWidth = 4.dp.toPx()
                 )
-                drawCircle(color = AppColors.Accent, radius = 8.dp.toPx(), center = Offset(inX, h / 2f))
+                drawCircle(color = AppColors.Accent, radius = 9.dp.toPx(), center = Offset(inX, 16.dp.toPx()))
 
-                // Out handle (Magenta Warning)
+                // OUT Handle (Vibrant Magenta)
                 drawLine(
                     color = AppColors.Warning,
                     start = Offset(outX, 0f),
                     end = Offset(outX, h),
                     strokeWidth = 4.dp.toPx()
                 )
-                drawCircle(color = AppColors.Warning, radius = 8.dp.toPx(), center = Offset(outX, h / 2f))
+                drawCircle(color = AppColors.Warning, radius = 9.dp.toPx(), center = Offset(outX, h - 16.dp.toPx()))
 
-                // Playhead (Gold/White line)
-                if (currentPositionMs in inPointMs..outPointMs) {
-                    drawLine(
-                        color = Color.White,
-                        start = Offset(playheadX, 0f),
-                        end = Offset(playheadX, h),
-                        strokeWidth = 2.dp.toPx()
-                    )
-                }
+                // Playhead Needle
+                drawLine(
+                    color = Color.White,
+                    start = Offset(playheadX, 0f),
+                    end = Offset(playheadX, h),
+                    strokeWidth = 2.5.dp.toPx()
+                )
+                drawCircle(color = Color.White, radius = 6.dp.toPx(), center = Offset(playheadX, h / 2f))
             }
         }
 
-        // Quick Set In / Set Out buttons
+        // Dedicated Manual Playhead Scrubber Slider
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AppRadius.md))
+                .background(AppColors.Surface)
+                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.md))
+                .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("PLAYHEAD SCRUBBER", color = AppColors.TextFaint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "${formatTime(currentPositionMs.toLong())} / ${formatTime(totalDurationMs)}",
+                    color = AppColors.Text,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Slider(
+                value = currentPositionMs.toFloat(),
+                onValueChange = { targetMs ->
+                    playerManager.seekTo(targetMs.toInt())
+                },
+                valueRange = 0f..totalDurationMs.toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = AppColors.Accent,
+                    inactiveTrackColor = AppColors.Border
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Quick Seek and In/Out Snapping Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Button(
+            OutlinedButton(
                 onClick = {
                     inPointMs = currentPositionMs.toLong().coerceIn(0L, (outPointMs - 1000L).coerceAtLeast(0L))
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceRaised)
+                border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Accent),
+                shape = RoundedCornerShape(AppRadius.md)
             ) {
-                Text("Set IN to Playhead", color = AppColors.Text, fontSize = 12.sp)
+                Text("Set IN to Current", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
-            Button(
+
+            OutlinedButton(
                 onClick = {
                     outPointMs = currentPositionMs.toLong().coerceIn((inPointMs + 1000L).coerceAtMost(totalDurationMs), totalDurationMs)
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceRaised)
+                border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Warning),
+                shape = RoundedCornerShape(AppRadius.md)
             ) {
-                Text("Set OUT to Playhead", color = AppColors.Text, fontSize = 12.sp)
+                Text("Set OUT to Current", color = AppColors.Warning, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
 
-        // Play / Pause preview selection
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(bottom = AppSpacing.xl),
-            contentAlignment = Alignment.Center
+        // Playback Control Cluster: -5s, Play/Pause Toggle, +5s
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = AppSpacing.sm),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            // Jump back 5 sec
+            IconButton(
+                onClick = {
+                    val prev = (currentPositionMs - 5000).coerceAtLeast(inPointMs.toInt())
+                    playerManager.seekTo(prev)
+                },
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(AppColors.SurfaceRaised)
+            ) {
+                Icon(Icons.Default.Replay5, contentDescription = "-5s", tint = AppColors.Text)
+            }
+
+            Spacer(modifier = Modifier.width(AppSpacing.xl))
+
+            // Primary Play / Pause Toggle Button
             IconButton(
                 onClick = {
                     if (isPlaying) {
                         playerManager.pause()
                     } else {
+                        // Start playing from current position or from inPoint if outside
+                        val startPos = if (currentPositionMs in inPointMs..outPointMs) currentPositionMs else inPointMs.toInt()
                         playerManager.play(
                             file = recording.file,
-                            startFromMs = inPointMs.toInt(),
+                            startFromMs = startPos,
                             loopToMs = outPointMs.toInt()
                         )
                     }
                 },
                 modifier = Modifier
-                    .size(68.dp)
+                    .size(64.dp)
                     .clip(CircleShape)
-                    .background(AppColors.Accent)
+                    .background(if (isPlaying) AppColors.Warning else AppColors.Accent)
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = "Preview",
+                    contentDescription = if (isPlaying) "Pause" else "Play",
                     tint = AppColors.Text,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 )
+            }
+
+            Spacer(modifier = Modifier.width(AppSpacing.xl))
+
+            // Jump forward 5 sec
+            IconButton(
+                onClick = {
+                    val next = (currentPositionMs + 5000).coerceAtMost(outPointMs.toInt())
+                    playerManager.seekTo(next)
+                },
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(AppColors.SurfaceRaised)
+            ) {
+                Icon(Icons.Default.Forward5, contentDescription = "+5s", tint = AppColors.Text)
             }
         }
     }
