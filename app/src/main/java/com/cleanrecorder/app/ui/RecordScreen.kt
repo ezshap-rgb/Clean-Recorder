@@ -1,5 +1,8 @@
 package com.cleanrecorder.app.ui
 
+import android.content.Context
+import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -15,20 +18,39 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cleanrecorder.app.service.RecordingService
 import com.cleanrecorder.app.theme.AppColors
 import com.cleanrecorder.app.theme.AppRadius
 import com.cleanrecorder.app.theme.AppSpacing
+import com.cleanrecorder.app.ui.components.LevelMeter
+import com.cleanrecorder.app.ui.components.NameDialog
 
 @Composable
-fun RecordScreen() {
-    var isRecording by remember { mutableStateOf(false) }
-    var isPaused by remember { mutableStateOf(false) }
-    var elapsedSeconds by remember { mutableLongStateOf(0L) }
+fun RecordScreen(
+    onRecordingSaved: () -> Unit
+) {
+    val context = LocalContext.current
 
+    val isRecording by RecordingService.isRecording.collectAsState()
+    val isPaused by RecordingService.isPaused.collectAsState()
+    val elapsedTenths by RecordingService.elapsedSeconds.collectAsState()
+    val amplitude by RecordingService.amplitude.collectAsState()
+    val lastFinishedFile by RecordingService.lastFinishedFile.collectAsState()
+
+    var showSaveDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(lastFinishedFile) {
+        if (lastFinishedFile != null) {
+            showSaveDialog = true
+        }
+    }
+
+    val elapsedSeconds = elapsedTenths / 10
     val formattedTime = remember(elapsedSeconds) {
         val hours = elapsedSeconds / 3600
         val mins = (elapsedSeconds % 3600) / 60
@@ -60,7 +82,6 @@ fun RecordScreen() {
                 style = MaterialTheme.typography.titleLarge,
                 color = AppColors.Text
             )
-            // Quality pill badge
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(AppRadius.pill))
@@ -69,7 +90,7 @@ fun RecordScreen() {
                     .padding(horizontal = AppSpacing.md, vertical = AppSpacing.xs)
             ) {
                 Text(
-                    text = "AAC High",
+                    text = "AAC 128 kbps",
                     color = AppColors.Accent,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
@@ -77,13 +98,13 @@ fun RecordScreen() {
             }
         }
 
-        // Timer & Waveform Card
+        // Timer & Level Meter Card
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(AppRadius.card))
                 .background(AppColors.Surface)
-                .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
+                .border(1.dp, if (isRecording) AppColors.Accent else AppColors.Border, RoundedCornerShape(AppRadius.card))
                 .padding(vertical = AppSpacing.xxl, horizontal = AppSpacing.lg),
             contentAlignment = Alignment.Center
         ) {
@@ -109,6 +130,14 @@ fun RecordScreen() {
                     },
                     fontWeight = FontWeight.Medium
                 )
+
+                Spacer(modifier = Modifier.height(AppSpacing.xl))
+
+                // Real-time animated level meter
+                LevelMeter(
+                    amplitude = amplitude,
+                    isRecording = isRecording && !isPaused
+                )
             }
         }
 
@@ -121,9 +150,13 @@ fun RecordScreen() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isRecording) {
-                // Pause / Resume
+                // Pause / Resume Button
                 IconButton(
-                    onClick = { isPaused = !isPaused },
+                    onClick = {
+                        val action = if (isPaused) RecordingService.ACTION_RESUME else RecordingService.ACTION_PAUSE
+                        val intent = Intent(context, RecordingService::class.java).apply { this.action = action }
+                        context.startService(intent)
+                    },
                     modifier = Modifier
                         .size(56.dp)
                         .clip(CircleShape)
@@ -137,12 +170,13 @@ fun RecordScreen() {
                     )
                 }
 
-                // Stop button
+                // Stop Button
                 IconButton(
                     onClick = {
-                        isRecording = false
-                        isPaused = false
-                        elapsedSeconds = 0
+                        val intent = Intent(context, RecordingService::class.java).apply {
+                            action = RecordingService.ACTION_STOP
+                        }
+                        context.startService(intent)
                     },
                     modifier = Modifier
                         .size(80.dp)
@@ -157,11 +191,13 @@ fun RecordScreen() {
                     )
                 }
             } else {
-                // Big Record Button with Gradient Border
+                // Record Button
                 IconButton(
                     onClick = {
-                        isRecording = true
-                        isPaused = false
+                        val intent = Intent(context, RecordingService::class.java).apply {
+                            action = RecordingService.ACTION_START
+                        }
+                        context.startForegroundService(intent)
                     },
                     modifier = Modifier
                         .size(86.dp)
@@ -177,5 +213,28 @@ fun RecordScreen() {
                 }
             }
         }
+    }
+
+    // Name dialog after recording finishes
+    if (showSaveDialog && lastFinishedFile != null) {
+        val file = lastFinishedFile!!
+        NameDialog(
+            initialName = file.nameWithoutExtension,
+            title = "Save Lecture Recording",
+            onConfirm = { newName ->
+                val target = java.io.File(file.parentFile, "$newName.${file.extension}")
+                if (newName.isNotBlank() && target.absolutePath != file.absolutePath) {
+                    file.renameTo(target)
+                }
+                RecordingService.clearLastFinishedFile()
+                showSaveDialog = false
+                onRecordingSaved()
+            },
+            onDismiss = {
+                RecordingService.clearLastFinishedFile()
+                showSaveDialog = false
+                onRecordingSaved()
+            }
+        )
     }
 }

@@ -12,6 +12,9 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.cleanrecorder.app.CleanRecorderApp
 import com.cleanrecorder.app.MainActivity
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 
 class RecordingService : Service() {
@@ -21,13 +24,33 @@ class RecordingService : Service() {
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_PAUSE = "ACTION_PAUSE"
         const val ACTION_RESUME = "ACTION_RESUME"
-
         const val NOTIFICATION_ID = 1001
+
+        private val _isRecording = MutableStateFlow(false)
+        val isRecording = _isRecording.asStateFlow()
+
+        private val _isPaused = MutableStateFlow(false)
+        val isPaused = _isPaused.asStateFlow()
+
+        private val _elapsedSeconds = MutableStateFlow(0L)
+        val elapsedSeconds = _elapsedSeconds.asStateFlow()
+
+        private val _amplitude = MutableStateFlow(0f)
+        val amplitude = _amplitude.asStateFlow()
+
+        private val _lastFinishedFile = MutableStateFlow<File?>(null)
+        val lastFinishedFile = _lastFinishedFile.asStateFlow()
+
+        fun clearLastFinishedFile() {
+            _lastFinishedFile.value = null
+        }
     }
 
     private var recorder: MediaRecorder? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var currentOutputFile: File? = null
+    private var serviceJob: Job? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -42,53 +65,104 @@ class RecordingService : Service() {
     }
 
     private fun startRecording() {
+        if (_isRecording.value) return
+
         acquireWakeLock()
         startForeground(NOTIFICATION_ID, buildNotification("Recording lecture..."))
 
         val recordingsDir = File(getExternalFilesDir(null), "Recordings").apply { mkdirs() }
-        currentOutputFile = File(recordingsDir, "lecture_${System.currentTimeMillis()}.m4a")
+        val fileName = "Lecture_${System.currentTimeMillis()}.m4a"
+        currentOutputFile = File(recordingsDir, fileName)
 
-        recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            MediaRecorder(this)
-        } else {
-            @Suppress("DEPRECATION")
-            MediaRecorder()
-        }.apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            setAudioEncodingBitRate(128_000)
-            setAudioSamplingRate(44_100)
-            setAudioChannels(1) // Mono speech optimization
-            setOutputFile(currentOutputFile?.absolutePath)
-            prepare()
-            start()
+        try {
+            recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(this)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }.apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(128_000)
+                setAudioSamplingRate(44_100)
+                setAudioChannels(1)
+                setOutputFile(currentOutputFile?.absolutePath)
+                prepare()
+                start()
+            }
+
+            _isRecording.value = true
+            _isPaused.value = false
+            _elapsedSeconds.value = 0L
+
+            startTicker()
+        } catch (e: Exception) {
+            stopRecording()
         }
     }
 
     private fun pauseRecording() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            recorder?.pause()
-            updateNotification("Recording paused")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && _isRecording.value && !_isPaused.value) {
+            try {
+                recorder?.pause()
+                _isPaused.value = true
+                updateNotification("Recording paused")
+            } catch (_: Exception) {}
         }
     }
 
     private fun resumeRecording() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            recorder?.resume()
-            updateNotification("Recording lecture...")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && _isRecording.value && _isPaused.value) {
+            try {
+                recorder?.resume()
+                _isPaused.value = false
+                updateNotification("Recording lecture...")
+            } catch (_: Exception) {}
         }
     }
 
     private fun stopRecording() {
+        serviceJob?.cancel()
+        serviceJob = null
+
         try {
             recorder?.stop()
             recorder?.release()
         } catch (_: Exception) {}
         recorder = null
+
+        _isRecording.value = false
+        _isPaused.value = false
+        _amplitude.value = 0f
+
+        currentOutputFile?.let {
+            if (it.exists() && it.length() > 0) {
+                _lastFinishedFile.value = it
+            }
+        }
+
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun startTicker() {
+        serviceJob?.cancel()
+        serviceJob = serviceScope.launch {
+            while (isActive && _isRecording.value) {
+                delay(100)
+                if (!_isPaused.value) {
+                    _elapsedSeconds.value += 1L // in 100ms units or count seconds
+                    val amp = recorder?.maxAmplitude ?: 0
+                    // Normalize amplitude 0..32767 to 0..1 with subtle log scale
+                    val normalized = (amp / 32767f).coerceIn(0f, 1f)
+                    _amplitude.value = normalized
+                } else {
+                    _amplitude.value = 0f
+                }
+            }
+        }
     }
 
     private fun acquireWakeLock() {
@@ -97,7 +171,7 @@ class RecordingService : Service() {
             PowerManager.PARTIAL_WAKE_LOCK,
             "CleanRecorder::RecordingWakeLock"
         ).apply {
-            acquire(4 * 60 * 60 * 1000L) // 4 hours max safety
+            acquire(4 * 60 * 60 * 1000L)
         }
     }
 
@@ -130,6 +204,7 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
         stopRecording()
         super.onDestroy()
     }
