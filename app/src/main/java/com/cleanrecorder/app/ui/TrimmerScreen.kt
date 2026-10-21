@@ -60,7 +60,7 @@ fun TrimmerScreen(
     val isPlaying by playerManager.isPlaying.collectAsState()
     val currentPositionMs by playerManager.currentPositionMs.collectAsState()
 
-    // Deterministic waveform envelope bars matching original React Native design
+    // 44 deterministic waveform bars
     val waveformBars = remember(recording.name) {
         val count = 44
         val bars = mutableListOf<Float>()
@@ -104,14 +104,14 @@ fun TrimmerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AppColors.Background)
-            // EXTRA SAFE SPACE ON TOP: statusBarsPadding + 14dp extra breathing room!
+            // EXTRA SAFE MARGIN ON TOP & GENEROUS BOTTOM CLEARANCE
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(top = 14.dp, start = AppSpacing.lg, end = AppSpacing.lg, bottom = AppSpacing.md)
+            .padding(top = 18.dp, start = AppSpacing.lg, end = AppSpacing.lg, bottom = 28.dp)
             .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // TOP HEADER MATCHING IMAGE 2 EXACTLY
+        // TOP HEADER
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -168,7 +168,7 @@ fun TrimmerScreen(
             }
         }
 
-        // CARD 1: PLAYBACK CONTROLS MATCHING IMAGE 2 EXACTLY
+        // CARD 1: PLAYBACK CONTROLS (AMBER PLAY BUTTON)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -177,14 +177,14 @@ fun TrimmerScreen(
                 .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
                 .padding(14.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Top Row: [ ▶ PLAY ] and [ ● Playhead: 00:00 ]
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Top Row: [ AMBER PLAY ] and [ Amber Playhead ]
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Big Magenta Play Button
+                    // AMBER PLAY / PAUSE BUTTON (#F59E0B)
                     Button(
                         onClick = {
                             if (isPlaying) {
@@ -198,7 +198,7 @@ fun TrimmerScreen(
                                 )
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF50ACE)),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.DotGold),
                         shape = RoundedCornerShape(AppRadius.pill),
                         modifier = Modifier
                             .weight(0.42f)
@@ -219,14 +219,13 @@ fun TrimmerScreen(
                         )
                     }
 
-                    // Amber Playhead Controller Button
+                    // Amber Playhead Pill
                     Row(
                         modifier = Modifier
                             .weight(0.58f)
                             .height(44.dp)
                             .clip(RoundedCornerShape(AppRadius.pill))
                             .background(Color(0xFF151C33))
-                            // BORDER IS AMBER (#F59E0B) MATCHING THEME
                             .border(1.5.dp, AppColors.DotGold, RoundedCornerShape(AppRadius.pill))
                             .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -236,13 +235,13 @@ fun TrimmerScreen(
                             modifier = Modifier
                                 .size(7.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFF50ACE))
+                                .background(AppColors.DotGold)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Playhead: ", color = AppColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         Text(
                             text = formatTime(currentPositionMs.toLong()),
-                            color = Color(0xFFF50ACE),
+                            color = AppColors.DotGold,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
@@ -262,9 +261,7 @@ fun TrimmerScreen(
                             .clip(RoundedCornerShape(AppRadius.md))
                             .background(Color(0xFF151C33))
                             .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.md))
-                            .clickable {
-                                playerManager.seekTo(inPointMs.toInt())
-                            },
+                            .clickable { playerManager.seekTo(inPointMs.toInt()) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text("Jump to IN", color = AppColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -277,9 +274,7 @@ fun TrimmerScreen(
                             .clip(RoundedCornerShape(AppRadius.md))
                             .background(Color(0xFF151C33))
                             .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.md))
-                            .clickable {
-                                playerManager.seekTo(outPointMs.toInt())
-                            },
+                            .clickable { playerManager.seekTo(outPointMs.toInt()) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text("Jump to OUT", color = AppColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -310,7 +305,7 @@ fun TrimmerScreen(
             }
         }
 
-        // CARD 2: WAVEFORM DISPLAY & INTERACTIVE TRIMMING MATCHING IMAGE 2
+        // CARD 2: WAVEFORM DISPLAY & SLIDER WITH AMBER PLAYHEAD
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -320,7 +315,6 @@ fun TrimmerScreen(
                 .padding(14.dp)
         ) {
             Column {
-                // Top timestamps and tick line
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -333,7 +327,6 @@ fun TrimmerScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Waveform Canvas with AMBER Playhead Needle
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -371,11 +364,9 @@ fun TrimmerScreen(
                         val outX = (outPointMs.toFloat() / totalDurationMs) * w
                         val playheadX = (currentPositionMs.toFloat() / totalDurationMs) * w
 
-                        // Dimmed outer regions
                         drawRect(color = Color(0xCC070913), topLeft = Offset(0f, 0f), size = Size(inX, h))
                         drawRect(color = Color(0xCC070913), topLeft = Offset(outX, 0f), size = Size(w - outX, h))
 
-                        // Waveform bars
                         val barWidth = w / waveformBars.size
                         waveformBars.forEachIndexed { idx, barAmp ->
                             val barX = idx * barWidth + barWidth / 2f
@@ -390,7 +381,7 @@ fun TrimmerScreen(
                             )
                         }
 
-                        // Left IN Handle Bracket (Pink/Magenta rounded bar matching image 2)
+                        // IN Handle
                         drawRoundRect(
                             color = Color(0xFFF50ACE),
                             topLeft = Offset(inX - 4.dp.toPx(), 0f),
@@ -398,7 +389,7 @@ fun TrimmerScreen(
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
                         )
 
-                        // Right OUT Handle Bracket (Rose/Red rounded bar matching image 2)
+                        // OUT Handle
                         drawRoundRect(
                             color = Color(0xFFF43F5E),
                             topLeft = Offset(outX - 2.dp.toPx(), 0f),
@@ -406,7 +397,7 @@ fun TrimmerScreen(
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
                         )
 
-                        // AMBER PLAYHEAD NEEDLE (#F59E0B)
+                        // AMBER Playhead Needle
                         drawLine(
                             color = AppColors.DotGold,
                             start = Offset(playheadX, 0f),
@@ -419,7 +410,6 @@ fun TrimmerScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Playhead Scrubber slider with AMBER THUMB
                 Slider(
                     value = currentPositionMs.toFloat(),
                     onValueChange = { targetMs -> playerManager.seekTo(targetMs.toInt()) },
@@ -434,7 +424,7 @@ fun TrimmerScreen(
             }
         }
 
-        // CARD 3: REGION TIME CONTROLS MATCHING IMAGE 2 EXACTLY
+        // CARD 3: REGION TIME CONTROLS
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -450,7 +440,6 @@ fun TrimmerScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Start pill
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -470,7 +459,6 @@ fun TrimmerScreen(
                         Text(formatTime(inPointMs), color = AppColors.Text, fontSize = 15.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                     }
 
-                    // Set to Playhead (Start)
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -494,7 +482,6 @@ fun TrimmerScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // End pill
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -514,7 +501,6 @@ fun TrimmerScreen(
                         Text(formatTime(outPointMs), color = AppColors.Text, fontSize = 15.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                     }
 
-                    // Set to Playhead (End)
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -532,7 +518,6 @@ fun TrimmerScreen(
                     }
                 }
 
-                // Selection Duration subtitle
                 val diffMs = outPointMs - inPointMs
                 val diffSecs = diffMs / 1000f
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -546,7 +531,7 @@ fun TrimmerScreen(
             }
         }
 
-        // CARD 4: ACTION / CONFIRMATION MATCHING IMAGE 2 EXACTLY
+        // CARD 4: ACTION / SAVE (SINGLE LINE INSTRUCTION & SINGLE LINE "SAVE TRIM")
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -555,16 +540,18 @@ fun TrimmerScreen(
                 .border(1.dp, AppColors.Border, RoundedCornerShape(AppRadius.card))
                 .padding(14.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Shortened single line instruction
                 Text(
-                    text = "Trim replaces the original file permanently with your In → Out selection.",
+                    text = "Trim replaces original file.",
                     color = AppColors.TextMuted,
-                    fontSize = 12.sp
+                    fontSize = 12.sp,
+                    maxLines = 1
                 )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     // Cancel
                     Button(
@@ -582,7 +569,7 @@ fun TrimmerScreen(
                         Text("Cancel", color = AppColors.Text, fontWeight = FontWeight.SemiBold)
                     }
 
-                    // Save Trimmed Audio
+                    // Single-line "Save Trim" button
                     Button(
                         onClick = {
                             if (isTrimming) return@Button
@@ -615,7 +602,7 @@ fun TrimmerScreen(
                         if (isTrimming) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AppColors.Text, strokeWidth = 2.dp)
                         } else {
-                            Text("↓ Save Trimmed Audio", color = AppColors.Text, fontWeight = FontWeight.Bold)
+                            Text("Save Trim", color = AppColors.Text, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                     }
                 }
